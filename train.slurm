@@ -109,10 +109,18 @@ if [[ -z "${LATEST_DIR:-}" ]]; then
 fi
 LATEST_DIR="${LATEST_DIR%/}"
 
+# Find latest checkpoint inside that run directory
+LATEST_CKPT=$(ls -t "${LATEST_DIR}"/model_*.pt 2>/dev/null | head -n 1 || true)
+if [[ -z "${LATEST_CKPT:-}" ]]; then
+  echo "No model_*.pt checkpoint found in ${LATEST_DIR}" >&2
+  exit 1
+fi
+echo "Using checkpoint: ${LATEST_CKPT}"
+
 # Run evaluation with the discovered checkpoint
 /isaac-sim/python.sh /workspace/run/scripts/rsl_rl/play.py \
   --task=Template-Rob6323-Go2-Direct-v0 \
-  --checkpoint "${LATEST_DIR}/model_499.pt" \
+  --checkpoint "${LATEST_CKPT}" \
   --video \
   --video_length 1000 \
   --headless

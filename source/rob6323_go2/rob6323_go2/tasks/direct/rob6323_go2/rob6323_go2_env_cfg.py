@@ -16,7 +16,7 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
-from issaclab.actuators import ImplicitActuatorCfg
+from isaaclab.actuators import ImplicitActuatorCfg
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
@@ -33,6 +33,9 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     Kp = 20.0  # Proportional gain
     Kd = 0.5   # Derivative gain
     torque_limits = 100.0  # Max torque
+    # Actuator friction parameters
+    mu_v_lim = 0.3
+    F_s_lim = 2.5
 
     base_height_min = 0.20  # Terminate if base is lower than 20cm
 

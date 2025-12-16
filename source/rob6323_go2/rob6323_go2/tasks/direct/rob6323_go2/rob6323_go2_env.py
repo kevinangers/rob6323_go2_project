@@ -10,6 +10,7 @@ import gymnasium as gym
 import math
 import torch
 from collections.abc import Sequence
+import numpy as np
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
@@ -37,10 +38,14 @@ class Rob6323Go2Env(DirectRLEnv):
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
 
         # PD control parameters
-        self.Kp = torch.tensor([cfg.Kp] * 12, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
+        self.Kp = torch.tensor([cfg.Kp] * 12, device=self.device).unsqueeze(0).repeat(self.num_envs, 1) # 12 is number of joints
         self.Kd = torch.tensor([cfg.Kd] * 12, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
         self.motor_offsets = torch.zeros(self.num_envs, 12, device=self.device)
         self.torque_limits = cfg.torque_limits
+
+        # Actuator friction parameters
+        self.mu_v = torch.zeros(self.num_envs, 12, device=self.device)
+        self.F_s = torch.zeros(self.num_envs, 12, device=self.device)
 
         # Logging
         self._episode_sums = { # running sum of per step rewards for logging
@@ -114,15 +119,17 @@ class Rob6323Go2Env(DirectRLEnv):
 
     def _apply_action(self) -> None:
         # Compute PD torques
-        torques = torch.clip(
-            (
-                self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel
-            ),
-            -self.torque_limits, self.torque_limits,
-        )
+        torques_pd = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel
+        
+        # Apply actuator friction model
+        tau_stiction = self.F_s * torch.tanh(self.robot.data.joint_vel / 0.1)
+        tau_viscous = self.mu_v * self.robot.data.joint_vel
+        tau_friction = tau_stiction + tau_viscous
 
-    # Apply torques to the robot
-    self.robot.set_joint_effort_target(torques)
+        torques = torch.clip(torques_pd - tau_friction, -self.torque_limits, self.torque_limits)
+
+        # Apply torques to the robot
+        self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
         self._previous_actions = self._actions.clone()
@@ -368,6 +375,9 @@ class Rob6323Go2Env(DirectRLEnv):
         self.last_actions[env_ids] = 0.
         # Reset raibert quantity
         self.gait_indices[env_ids] = 0
+        # Draw new random friction parameters
+        self.mu_v[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.mu_v_lim).expand(-1, 12)
+        self.F_s[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.F_s_lim).expand(-1, 12)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers
