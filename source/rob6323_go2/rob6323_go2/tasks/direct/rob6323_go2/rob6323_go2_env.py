@@ -47,6 +47,9 @@ class Rob6323Go2Env(DirectRLEnv):
         self.mu_v = torch.zeros(self.num_envs, 12, device=self.device)
         self.F_s = torch.zeros(self.num_envs, 12, device=self.device)
 
+        # Torque Regularization
+        self.torques = torch.zeros(self.num_envs, 12, device=self.device)
+
         # Logging
         self._episode_sums = { # running sum of per step rewards for logging
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
@@ -61,6 +64,7 @@ class Rob6323Go2Env(DirectRLEnv):
                 "ang_vel_xy",
                 "feet_clearance",
                 "tracking_contacts_shaped_force",
+                "rew_torque",
             ]
         }
         # variables needed for action rate penalization
@@ -127,6 +131,7 @@ class Rob6323Go2Env(DirectRLEnv):
         tau_friction = tau_stiction + tau_viscous
 
         torques = torch.clip(torques_pd - tau_friction, -self.torque_limits, self.torque_limits)
+        self.torques = torques  # For torque regularization
 
         # Apply torques to the robot
         self.robot.set_joint_effort_target(torques)
@@ -204,6 +209,8 @@ class Rob6323Go2Env(DirectRLEnv):
         
         rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4 # avg over 4 feet
 
+        rew_torque = torch.sum(torch.square(self.torques), dim=1)   # Torque Regularization
+
         # Add to rewards dict
         # scale each reward component by coeffs from cfg
         rewards = {
@@ -217,6 +224,8 @@ class Rob6323Go2Env(DirectRLEnv):
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
             "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
             "tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,
+            "rew_torque": rew_torque * self.cfg.torque_reward_scale,
+            
         }
         
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0) # sum all reward components to get final reward per env
