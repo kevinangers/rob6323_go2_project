@@ -106,3 +106,5 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     lin_vel_z_reward_scale = -0.02
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.001
+    torque_reward_scale = -0.0001  # Penalty for high torque magnitude
+    foot2contact_reward_scale = 0  # 0.09  # 0.11  # 1.0  # Deactivated at 0
