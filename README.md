@@ -175,7 +175,7 @@ Add the following lines to the setup_scene function, so that the contact sensor 
 self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
 self.scene.sensors["contact_sensor"] = self._contact_sensor # <---- Added
 ```
-For this line to work, update the base minimum height from 0.2 to 0.05.
+To prevent the rewards from breaking the training, decrease the base minimum height from 0.2 to 0.05.
 ```
 # In Rob6323Go2EnvCfg
 base_height_min = 0.05  # Terminate
