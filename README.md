@@ -180,6 +180,28 @@ For this line to work, update the base minimum height from 0.2 to 0.05.
 # In Rob6323Go2EnvCfg
 base_height_min = 0.05  # Terminate
 ```
+## Feet2Contact Reward (Optional) 
+This reward is optional. If hopping is ever observed in your simulation, or you want to finetune the gait to be more symmetrical, this reward ensures that. 
+
+### Scale Reward
+Add the scale for the reward. Adjust the number as needed till you reach your desired gait. Start from as high as 1 and decrease until desired results are reached. This reward is harsh; so a small scale is necessary.
+```
+# In Rob6323Go2EnvCfg
+base_height_min = 0.00  # Originally Deactivated: Can start with 0.0009
+```
+### Reward Logic
+This reward penalizes more or less than two feet on the ground. The forces for each of the foot are collected. The num_contacts finds the number of feet in contact with the ground. The final rew_foot2contact finds the percentage and includes a negative sign to penalize the incorrect amount of feet
+```
+# In Rob6323Go2Env._get_rewards
+        # Added Logic
+        foot_contact_forces_z = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2]
+        num_contacts = (foot_contact_forces_z > 1.0).sum(1).float()
+        rew_foot2contact = - torch.abs(num_contacts - 2) / 2.0
+
+        rewards = {
+            # ... Other rewards
+            "foot2contact": rew_foot2contact * self.cfg.foot2contact_reward_scale,  # <--- Added
+```
 
 ## Torque Regularization
 To generate smoother movement and prevent the application of sudden torques to the Unitree Go2, torque regularization is included in the project.
