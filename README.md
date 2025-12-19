@@ -163,13 +163,13 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
     - [ArticulationData (`robot.data`)](https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.assets.html#isaaclab.assets.ArticulationData) — Contains `root_pos_w`, `joint_pos`, `projected_gravity_b`, etc.
     - [ContactSensorData (`_contact_sensor.data`)](https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.sensors.html#isaaclab.sensors.ContactSensorData) — Contains `net_forces_w` (contact forces).
 
----
+-------------------------------------------------------------------------------------------------------------------------
 Students should only edit README.md below this line.
 
 # Team Additions
 
 ## Contact Sensor Update
-Add the following lines to the setup_scene function, so that the contact sensor information from the simulation 2can be fed to the scene.
+Add the following lines to the setup_scene function, so that the contact sensor information from the simulation can be fed to the scene. 
 ```
 # In Rob6323Go2Env._setup_scene
 self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
@@ -225,4 +225,54 @@ rewards = {
             # ... other rewards
             "rew_torque": rew_torque * self.cfg.torque_reward_scale,
         }
+```
+
+##  Actuator Friction Model with Randomization
+To create a more realistic simulation, we add an actuator friction/viscous model where the the paramaters are randomized per episode. Before adding friction to the model, the torques must be subtracted to find the PD controller torque.
+
+
+### Define Friction Actuator Parameters
+Add the following parameters to the config.
+
+```
+# In Rob6323Go2EnvCfg
+mu_v_lim = 0.3
+F_s_lim = 2.5 
+```
+
+### Initialization of Friction Actuator Parameters
+Define new attributes for the viscous and static friction.
+```
+# In Rob6323Go2Env.__init__
+self.mu_v = torch.zeros(self.num_envs, 12, device=self.device)
+self.F_s = torch.zeros(self.num_envs, 12, device=self.device)
+```
+
+### Adjust _apply_action calculations
+The PD torques need to be calculated by using the PD controller. After calculating the viscious and static friction, they are combined together and subtracted from the original PD torques found to find the total torque.
+
+```
+# In Rob6323Go2Env._apply_action
+def _apply_action(self) -> None:
+        # Compute PD torques
+        torques_pd = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel # <--- Added
+        
+        # Apply actuator friction model 
+        tau_stiction = self.F_s * torch.tanh(self.robot.data.joint_vel / 0.1)                    # <--- Added
+        tau_viscous = self.mu_v * self.robot.data.joint_vel                                      # <--- Added
+        tau_friction = tau_stiction + tau_viscous                                                # <--- Added
+
+        torques = torch.clip(torques_pd - tau_friction, -self.torque_limits, self.torque_limits) # <--- Added
+        self.torques = torques  # For torque regularization
+
+        # Apply torques to the robot
+        self.robot.set_joint_effort_target(torques)
+```
+
+### Reset Actuator Friction Parameters
+For each episode, the static and viscious friction values need to be reset since the friction for each episode is different.
+```
+# In Rob6323Go2Env._reset_idx
+self.mu_v[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.mu_v_lim).expand(-1, 12)
+self.F_s[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.F_s_lim).expand(-1, 12)
 ```
