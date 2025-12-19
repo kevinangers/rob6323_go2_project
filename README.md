@@ -166,7 +166,7 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
 ---
 Students should only edit README.md below this line.
 
-### Team Additions
+# Team Additions
 
 ## Contact Sensor Update
 Add the following lines to the setup_scene function, so that the contact sensor information from the simulation 2can be fed to the scene.
@@ -183,13 +183,13 @@ base_height_min = 0.05  # Terminate
 
 ## Torque Regularization
 To generate smoother movement and prevent the application of sudden torques to the Unitree Go2, torque regularization is included in the project.
-# Initialization
+### Initialization
 A new attribute is created in the initialization function. This attribute will hold the torque information for the entire class.
 ```
 # In Rob6323Go2Env.__init__
 self.torques = torch.zeros(self.num_envs, 12, device=self.device)
 ```
-# Sending Torque Information to Attribute
+### Sending Torque Information to Attribute
 
 The torques are already calculated in _apply_action(self). Use this calculation as the value for self.torques.
 ```
@@ -209,13 +209,13 @@ def _apply_action(self) -> None:
 ... rest of function
 ```
 
-# Torque Reward Scale
+### Torque Reward Scale
 We need to give the model a scale to better understand the penalty for having high torques. Add this reward to your configuration file. Any value smaller than 0.0001 should work.
 ```
 # In Rob6323Go2EnvCfg
  torque_reward_scale = -0.00001  # Penalty for high torque magnitude
 ```
-# Apply Torque Regularization Reward
+### Apply Torque Regularization Reward
 Now that we have the torques, we can calculate the penalty and send it to the rewards dictionary to prevent large values of torques!
 
 ```
