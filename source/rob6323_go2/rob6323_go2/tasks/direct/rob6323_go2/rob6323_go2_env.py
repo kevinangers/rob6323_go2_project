@@ -205,6 +205,7 @@ class Rob6323Go2Env(DirectRLEnv):
         foot_forces = torch.norm(self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :], dim=-1)
         desired_contact = self.desired_contact_states
         rew_tracking_contacts_shaped_force = 0.
+
         for i in range(4):
             rew_tracking_contacts_shaped_force += - (1 - desired_contact[:, i]) * (
                         1 - torch.exp(-1 * foot_forces[:, i] ** 2 / 100.))        
@@ -214,7 +215,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # Torque Regularization
         rew_torque = torch.sum(torch.square(self.torques), dim=1)
 
-        ### Foot2Contact Reward
+        # Foot2Contact Reward
         # NOTE: Using the Z component of world-frame net_forces_w for feet
         foot_contact_forces_z = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2]
         
