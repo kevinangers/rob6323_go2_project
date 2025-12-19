@@ -184,13 +184,13 @@ base_height_min = 0.05  # Terminate
 This reward is optional. If hopping is ever observed in your simulation, or you want to finetune the gait to be more symmetrical, this reward ensures that. 
 
 ### Scale Reward
-Add the scale for the reward. Adjust the number as needed till you reach your desired gait. Start from as high as 1 and decrease until desired results are reached. This reward is harsh; so a small scale is necessary.
+Add the scale for the reward. Adjust the number as needed till you reach your desired gait. Start from as high as 1 and decrease until desired results are reached. This reward is harsh so a small scale is necessary.
 ```
 # In Rob6323Go2EnvCfg
 base_height_min = 0.00  # Originally Deactivated: Can start with 0.0009
 ```
 ### Reward Logic
-This reward penalizes more or less than two feet on the ground. The forces for each of the foot are collected. The num_contacts finds the number of feet in contact with the ground. The final rew_foot2contact finds the percentage and includes a negative sign to penalize the incorrect amount of feet
+This reward penalizes more or less than two feet on the ground. The forces for each of the foot are collected. The num_contacts finds the number of feet in contact with the ground. The final rew_foot2contact finds the percentage and includes a negative sign to penalize the incorrect amount of feet.
 ```
 # In Rob6323Go2Env._get_rewards
         # Added Logic
