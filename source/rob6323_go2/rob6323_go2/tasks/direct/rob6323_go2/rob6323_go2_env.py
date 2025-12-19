@@ -65,6 +65,7 @@ class Rob6323Go2Env(DirectRLEnv):
                 "feet_clearance",
                 "tracking_contacts_shaped_force",
                 "rew_torque",
+                "foot2contact",
             ]
         }
         # variables needed for action rate penalization
@@ -101,6 +102,7 @@ class Rob6323Go2Env(DirectRLEnv):
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
+        self.scene.sensors["contact_sensor"] = self._contact_sensor
         # add ground plane
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -209,7 +211,23 @@ class Rob6323Go2Env(DirectRLEnv):
         
         rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4 # avg over 4 feet
 
-        rew_torque = torch.sum(torch.square(self.torques), dim=1)   # Torque Regularization
+        # Torque Regularization
+        rew_torque = torch.sum(torch.square(self.torques), dim=1)
+
+        ### Foot2Contact Reward
+        # NOTE: Using the Z component of world-frame net_forces_w for feet
+        foot_contact_forces_z = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2]
+        
+        # 1. Check which feet have contact force > 1.0 N (i.e., are in contact)
+        contacts_binary = (foot_contact_forces_z > 1.0)
+        
+        # 2. Sum the contacts (count how many feet are in contact)
+        num_contacts = contacts_binary.sum(1).float()
+        
+        # 3. Calculate the penalty: |num_contacts - 2| / 2
+        #    - If num_contacts is 2, penalty is |2-2|/2 = 0 (max reward)
+        #    - If num_contacts is 0 or 4, penalty is |0-2|/2 = 1 or |4-2|/2 = 1 (max penalty)
+        rew_foot2contact = - torch.abs(num_contacts - 2) / 2.0
 
         # Add to rewards dict
         # scale each reward component by coeffs from cfg
@@ -225,7 +243,7 @@ class Rob6323Go2Env(DirectRLEnv):
             "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
             "tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,
             "rew_torque": rew_torque * self.cfg.torque_reward_scale,
-            
+            "foot2contact": rew_foot2contact * self.cfg.foot2contact_reward_scale,
         }
         
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0) # sum all reward components to get final reward per env

@@ -37,7 +37,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     mu_v_lim = 0.3
     F_s_lim = 2.5
 
-    base_height_min = 0.20  # Terminate if base is lower than 20cm
+    base_height_min = 0.05  # Terminate if base is lower than 5cm
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -107,4 +107,4 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.001
     torque_reward_scale = -0.0001  # Penalty for high torque magnitude
-    foot2contact_reward_scale = 0  # 0.09  # 0.11  # 1.0  # Deactivated at 0
+    foot2contact_reward_scale = 0.00 # 0.11  # 1.0
