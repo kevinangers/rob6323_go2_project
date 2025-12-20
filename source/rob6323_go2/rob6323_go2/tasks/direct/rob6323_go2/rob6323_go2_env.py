@@ -201,17 +201,20 @@ class Rob6323Go2Env(DirectRLEnv):
 
         # -- Feet clearance reward --
         phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
-        
-        # foot_height = self.foot_positions_w[:, :, 2]
-        # target_height = 0.08 * phases + 0.02
-        # rew_foot_clearance = torch.square(target_height - foot_height) * (1.0 - self.desired_contact_states)
 
-        # use foot height relative to base for clearance reward (better for uneven terrain)
-        base_z = self.robot.data.root_pos_w[:, 2].unsqueeze(1)
-        foot_z_rel = self.foot_positions_w[:, :, 2] - base_z
-        # target is "nominal stance height" + swing clearance bump
-        target_z_rel = self._nominal_foot_z_rel + (0.08 * phases + 0.02)
-        rew_foot_clearance = (target_z_rel - foot_z_rel).square() * (1.0 - self.desired_contact_states)
+        ## === Use for flat terrain ===
+        foot_height = self.foot_positions_w[:, :, 2]
+        target_height = 0.08 * phases + 0.02
+        rew_foot_clearance = torch.square(target_height - foot_height) * (1.0 - self.desired_contact_states)
+        # ===
+        # === Use for rough terrain ===
+        # # use foot height relative to base for clearance reward (better for uneven terrain)
+        # base_z = self.robot.data.root_pos_w[:, 2].unsqueeze(1)
+        # foot_z_rel = self.foot_positions_w[:, :, 2] - base_z
+        # # target is "nominal stance height" + swing clearance bump
+        # target_z_rel = self._nominal_foot_z_rel + (0.08 * phases + 0.02)
+        # rew_foot_clearance = (target_z_rel - foot_z_rel).square() * (1.0 - self.desired_contact_states)
+        # ===
         rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
 
         # -- Contact tracking shaped by forces reward --
@@ -389,8 +392,8 @@ class Rob6323Go2Env(DirectRLEnv):
         base_height = self.robot.data.root_pos_w[:, 2]
         # cstr_base_height_min = base_height < self.cfg.base_height_min
 
-        # died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min
-        died = cstr_upsidedown
+        died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min
+        # died = cstr_upsidedown
         return died, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None): 

@@ -54,9 +54,11 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     )
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="generator",
-        terrain_generator=ROUGH_TERRAINS_CFG,
-        max_init_terrain_level=9,
+        terrain_type="plane",
+        # UNCOMMENT BELOW TO ENABLE ROUGH TERRAIN
+        # terrain_type="generator", 
+        # terrain_generator=ROUGH_TERRAINS_CFG,
+        # max_init_terrain_level=9,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -111,4 +113,4 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     ang_vel_xy_reward_scale = -0.001
     torque_reward_scale = -0.0001 
     foot2contact_reward_scale = 0.00
-    feet_air_time_reward_scale = 1.0
+    feet_air_time_reward_scale = 0.0 # 1.0
