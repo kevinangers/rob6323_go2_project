@@ -17,6 +17,7 @@ from isaaclab.sensors import ContactSensorCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
@@ -53,7 +54,9 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     )
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="plane",
+        terrain_type="generator",
+        terrain_generator=ROUGH_TERRAINS_CFG,
+        max_init_terrain_level=9,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -108,3 +111,4 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     ang_vel_xy_reward_scale = -0.001
     torque_reward_scale = -0.0001  # Penalty for high torque magnitude
     foot2contact_reward_scale = 0.00 # 0.11  # 1.0
+    feet_air_time_reward_scale = 1.0

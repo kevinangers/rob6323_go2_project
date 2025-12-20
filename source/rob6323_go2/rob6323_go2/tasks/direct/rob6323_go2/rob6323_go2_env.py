@@ -66,6 +66,7 @@ class Rob6323Go2Env(DirectRLEnv):
                 "tracking_contacts_shaped_force",
                 "rew_torque",
                 "foot2contact",
+                "feet_air_time",
             ]
         }
         # variables needed for action rate penalization
@@ -83,6 +84,9 @@ class Rob6323Go2Env(DirectRLEnv):
 
             sensor_ids, _ = self._contact_sensor.find_bodies(name)
             self._feet_ids_sensor.append(sensor_ids[0])
+
+        # Nominal stance foot height relative to base (used for feet clearance reward w/ uneven terrain)
+        self._nominal_foot_z_rel = torch.zeros(self.num_envs, 1, device=self.device)
 
         # Variables needed for the raibert heuristic
         self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
@@ -195,10 +199,16 @@ class Rob6323Go2Env(DirectRLEnv):
 
         # Feet clearance reward
         phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
-        foot_height = self.foot_positions_w[:, :, 2]
-        target_height = 0.08 * phases + 0.02
+        # foot_height = self.foot_positions_w[:, :, 2]
+        # target_height = 0.08 * phases + 0.02
+        # rew_foot_clearance = torch.square(target_height - foot_height) * (1.0 - self.desired_contact_states)
 
-        rew_foot_clearance = torch.square(target_height - foot_height) * (1.0 - self.desired_contact_states)
+        # use foot height relative to base for clearance reward (better for uneven terrain)
+        base_z = self.robot.data.root_pos_w[:, 2].unsqueeze(1)
+        foot_z_rel = self.foot_positions_w[:, :, 2] - base_z
+        # target is "nominal stance height" + swing clearance bump
+        target_z_rel = self._nominal_foot_z_rel + (0.08 * phases + 0.02)
+        rew_foot_clearance = (target_z_rel - foot_z_rel).square() * (1.0 - self.desired_contact_states)
         rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
 
         # Contact tracking shaped by forces reward
@@ -230,6 +240,17 @@ class Rob6323Go2Env(DirectRLEnv):
         #    - If num_contacts is 0 or 4, penalty is |0-2|/2 = 1 or |4-2|/2 = 1 (max penalty)
         rew_foot2contact = - torch.abs(num_contacts - 2) / 2.0
 
+        # Feet air-time reward (encourages stepping when commanded)
+        first_contact = self._contact_sensor.compute_first_contact(self.step_dt)[:, self._feet_ids_sensor]  # (E,4)
+        last_air_time = self._contact_sensor.data.last_air_time[:, self._feet_ids_sensor]                  # (E,4)
+
+        # reward a "proper" swing: only when the foot just touched down, and it was in the air for a while
+        air_time_rew = torch.sum((last_air_time - 0.3) * first_contact, dim=1)
+
+        # gate it: only pay this reward when the command wants motion
+        cmd_speed = torch.norm(self._commands[:, :2], dim=1)
+        air_time_rew = air_time_rew * (cmd_speed > 0.1)
+
         # Add to rewards dict
         # scale each reward component by coeffs from cfg
         rewards = {
@@ -245,6 +266,7 @@ class Rob6323Go2Env(DirectRLEnv):
             "tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,
             "rew_torque": rew_torque * self.cfg.torque_reward_scale,
             "foot2contact": rew_foot2contact * self.cfg.foot2contact_reward_scale,
+            "feet_air_time": air_time_rew * self.cfg.feet_air_time_reward_scale,
         }
         
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0) # sum all reward components to get final reward per env
@@ -362,9 +384,10 @@ class Rob6323Go2Env(DirectRLEnv):
         
         # terminate if base height is too low
         base_height = self.robot.data.root_pos_w[:, 2]
-        cstr_base_height_min = base_height < self.cfg.base_height_min
+        # cstr_base_height_min = base_height < self.cfg.base_height_min
 
-        died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min
+        # died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min
+        died = cstr_termination_contacts | cstr_upsidedown
         return died, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None): 
@@ -406,6 +429,10 @@ class Rob6323Go2Env(DirectRLEnv):
         # Draw new random friction parameters
         self.mu_v[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.mu_v_lim).expand(-1, 12)
         self.F_s[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.F_s_lim).expand(-1, 12)
+
+        base_z = self.robot.data.root_pos_w[env_ids, 2].unsqueeze(1)
+        feet_z = self.foot_positions_w[env_ids, :, 2]
+        self._nominal_foot_z_rel[env_ids] = torch.mean(feet_z - base_z, dim=1, keepdim=True)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers
