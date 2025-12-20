@@ -321,14 +321,14 @@ def _pre_physics_step(self, actions: torch.Tensor) -> None:
 ## Rewards
 The following rewards need to be added. With enough rewards, we can describe the behavior we want the robot to learn on its own. For the raibert_heuristic_reward, add a raibert_heuristic function describing the symmetric gait.
 
-action_rate: Penalizes high frequency oscillations with first and second derivative
-orient_reward: Prevent orientation
-lin_vel_z_reward: Prevent bouncing
-dof_vel_reward: Prevents high joint velocities
-ang_vel_xy_reward: Penalize angular velocity in the X and Y plane
-raibert_heuristic_reward: Footwork that follows trotting symmetric gait
-feet_clearance_reward: Lifting feet during a swing
-tracking_contacts_shaped_force_reward: Grounding feet during a stance
+- action_rate: Penalizes high frequency oscillations with first and second derivative
+- orient_reward: Prevent orientation
+- lin_vel_z_reward: Prevent bouncing
+- dof_vel_reward: Prevents high joint velocities
+- ang_vel_xy_reward: Penalize angular velocity in the X and Y plane
+- raibert_heuristic_reward: Footwork that follows trotting symmetric gait
+- feet_clearance_reward: Lifting feet during a swing
+- tracking_contacts_shaped_force_reward: Grounding feet during a stance
 
 ## Reward Scales
 Add the following reward scales in the config.
