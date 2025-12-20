@@ -163,5 +163,246 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
     - [ArticulationData (`robot.data`)](https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.assets.html#isaaclab.assets.ArticulationData) — Contains `root_pos_w`, `joint_pos`, `projected_gravity_b`, etc.
     - [ContactSensorData (`_contact_sensor.data`)](https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.sensors.html#isaaclab.sensors.ContactSensorData) — Contains `net_forces_w` (contact forces).
 
----
-Students should only edit README.md below this ligne.
+-------------------------------------------------------------------------------------------------------------------------
+Students should only edit README.md below this line.
+
+# Team Additions
+
+## Contact Sensor Update
+Add the following lines to the setup_scene function, so that the contact sensor information from the simulation can be fed to the scene. 
+```
+# In Rob6323Go2Env._setup_scene
+self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
+self.scene.sensors["contact_sensor"] = self._contact_sensor # <---- Added
+```
+To prevent the rewards from breaking the training, decrease the base minimum height from 0.2 to 0.05.
+```
+# In Rob6323Go2EnvCfg
+base_height_min = 0.05  # Terminate
+```
+## Feet2Contact Reward (Optional) 
+This reward is optional. If hopping is ever observed in your simulation, or you want to finetune the gait to be more symmetrical, this reward ensures that. 
+
+### Scale Reward
+Add the scale for the reward. Adjust the number as needed till you reach your desired gait. Start from as high as 1 and decrease until desired results are reached. This reward is harsh so a small scale is necessary.
+```
+# In Rob6323Go2EnvCfg
+base_height_min = 0.00  # Originally Deactivated: Can start with 0.0009
+```
+### Reward Logic
+This reward penalizes more or less than two feet on the ground. The forces for each of the foot are collected. The num_contacts finds the number of feet in contact with the ground. The final rew_foot2contact finds the percentage and includes a negative sign to penalize the incorrect amount of feet.
+```
+# In Rob6323Go2Env._get_rewards
+        # Added Logic
+        foot_contact_forces_z = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2]
+        num_contacts = (foot_contact_forces_z > 1.0).sum(1).float()
+        rew_foot2contact = - torch.abs(num_contacts - 2) / 2.0
+
+        rewards = {
+            # ... Other rewards
+            "foot2contact": rew_foot2contact * self.cfg.foot2contact_reward_scale,  # <--- Added
+```
+
+## Torque Regularization
+To generate smoother movement and prevent the application of sudden torques to the Unitree Go2, torque regularization is included in the project.
+### Initialization
+A new attribute is created in the initialization function. This attribute will hold the torque information for the entire class.
+```
+# In Rob6323Go2Env.__init__
+self.torques = torch.zeros(self.num_envs, 12, device=self.device)
+```
+### Sending Torque Information to Attribute
+
+The torques are already calculated in _apply_action(self). Use this calculation as the value for self.torques.
+```
+# In Rob6323Go2Env._apply_action
+def _apply_action(self) -> None:
+        # Compute PD torques
+        torques_pd = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel
+        
+        # Apply actuator friction model
+        tau_stiction = self.F_s * torch.tanh(self.robot.data.joint_vel / 0.1)
+        tau_viscous = self.mu_v * self.robot.data.joint_vel
+        tau_friction = tau_stiction + tau_viscous
+
+        torques = torch.clip(torques_pd - tau_friction, -self.torque_limits, self.torque_limits)
+        self.torques = torques  # <----- Added
+
+... rest of function
+```
+
+### Torque Reward Scale
+We need to give the model a scale to better understand the penalty for having high torques. Add this reward to your configuration file. Any value smaller than 0.0001 should work.
+```
+# In Rob6323Go2EnvCfg
+ torque_reward_scale = -0.00001  # Penalty for high torque magnitude
+```
+### Apply Torque Regularization Reward
+Now that we have the torques, we can calculate the penalty and send it to the rewards dictionary to prevent large values of torques!
+
+```
+# In Rob6323Go2Env._get_rewards
+rew_torque = torch.sum(torch.square(self.torques), dim=1)
+rewards = {
+            # ... other rewards
+            "rew_torque": rew_torque * self.cfg.torque_reward_scale,
+        }
+```
+
+##  Actuator Friction Model with Randomization
+To create a more realistic simulation, we add an actuator friction/viscous model where the the paramaters are randomized per episode. Before adding friction to the model, the torques must be subtracted to find the PD controller torque.
+
+
+### Define Friction Actuator Parameters
+Add the following parameters to the config.
+
+```
+# In Rob6323Go2EnvCfg
+mu_v_lim = 0.3
+F_s_lim = 2.5 
+```
+
+### Initialization of Friction Actuator Parameters
+Define new attributes for the viscous and static friction.
+```
+# In Rob6323Go2Env.__init__
+self.mu_v = torch.zeros(self.num_envs, 12, device=self.device)
+self.F_s = torch.zeros(self.num_envs, 12, device=self.device)
+```
+
+### Adjust _apply_action calculations
+The PD torques need to be calculated by using the PD controller. After calculating the viscious and static friction, they are combined together and subtracted from the original PD torques found to find the total torque.
+
+```
+# In Rob6323Go2Env._apply_action
+def _apply_action(self) -> None:
+        # Compute PD torques
+        torques_pd = self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos) - self.Kd * self.robot.data.joint_vel # <--- Added
+        
+        # Apply actuator friction model 
+        tau_stiction = self.F_s * torch.tanh(self.robot.data.joint_vel / 0.1)                    # <--- Added
+        tau_viscous = self.mu_v * self.robot.data.joint_vel                                      # <--- Added
+        tau_friction = tau_stiction + tau_viscous                                                # <--- Added
+
+        torques = torch.clip(torques_pd - tau_friction, -self.torque_limits, self.torque_limits) # <--- Added
+        self.torques = torques  # For torque regularization
+
+        # Apply torques to the robot
+        self.robot.set_joint_effort_target(torques)
+```
+
+### Reset Actuator Friction Parameters
+For each episode, the static and viscious friction values need to be reset since the friction for each episode is different.
+```
+# In Rob6323Go2Env._reset_idx
+self.mu_v[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.mu_v_lim).expand(-1, 12)
+self.F_s[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.F_s_lim).expand(-1, 12)
+```
+-------------------------------------------------------------------------------------------------------------------------
+# Tutorial Additions
+To convert the minimal implementation of DirectRLEnv to a more robust walking policy for the Unitree Go2, additional rewards and functions need to be added to the config and env files. 
+
+## PD Controller
+Define custom gains and update the robot_cfg in the config. Add the following import:
+```
+# In Rob6323Go2EnvCfg
+from isaaclab.actuators import ImplicitActuatorCfg
+```
+Initalize parameters in the __init__ function. Add the following _pre_physics_step and _apply_action to Rob6323Go2EnvCfg.
+```
+# In Rob6323Go2Env
+def _pre_physics_step(self, actions: torch.Tensor) -> None:
+    self._actions = actions.clone()
+    # Compute desired joint positions from policy actions
+    self.desired_joint_pos = (
+        self.cfg.action_scale * self._actions 
+        + self.robot.data.default_joint_pos
+    )
+```
+
+## Rewards
+The following rewards need to be added. With enough rewards, we can describe the behavior we want the robot to learn on its own. For the raibert_heuristic_reward, add a raibert_heuristic function describing the symmetric gait.
+
+- action_rate: Penalizes high frequency oscillations with first and second derivative
+- orient_reward: Prevent orientation
+- lin_vel_z_reward: Prevent bouncing
+- dof_vel_reward: Prevents high joint velocities
+- ang_vel_xy_reward: Penalize angular velocity in the X and Y plane
+- raibert_heuristic_reward: Footwork that follows trotting symmetric gait
+- feet_clearance_reward: Lifting feet during a swing
+- tracking_contacts_shaped_force_reward: Grounding feet during a stance
+
+## Reward Scales
+Add the following reward scales in the config.
+```
+# In Rob6323Go2EnvCfg
+# ... rewards given
+action_rate_reward_scale = -0.1  # Added: Step 1.1 Update Configuration 
+orient_reward_scale = -5.0
+lin_vel_z_reward_scale = -0.02
+dof_vel_reward_scale = -0.0001
+ang_vel_xy_reward_scale = -0.001
+raibert_heuristic_reward_scale = -10.0
+feet_clearance_reward_scale = -30.0
+tracking_contacts_shaped_force_reward_scale = 4.0
+```
+## Reward Implementations
+
+### Apply Action Rate
+Initialize a torch tensor to record past actions. Find the difference between the current and last self._actions. The second derivative (Current - 2* Last + 2nd Last Value) is calculated and added to the first derivative.
+
+### Orientation
+Use projected_gravity_b to penalize non-vertical orientation. Use the following line in the _get_rewards function.
+```
+# In Rob6323Go2Env._get_rewards
+rew_orient = torch.sum(torch.square(self.robot.data.projected_gravity_b[:, :2]), dim=1)
+```
+### Vertical Velocity
+Use the z component of the base linear velocity. Use the following line in the _get_rewards function.
+```
+# In Rob6323Go2Env._get_rewards
+rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
+```
+### Joint Velocities
+joint_vel has the values for the joint velocities. 
+```
+# In Rob6323Go2Env._get_rewards
+rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1)
+
+```
+### Angular Velocity
+The angular velocities can be accessed by root_ang_vel_b.
+```
+# In Rob6323Go2Env._get_rewards
+rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
+```
+### _reset_idx and Episode Sums
+Gait indicies and last actions must be reset for every episode.
+After defining the reward in the rewards dictionary in the _get_rewards function, the reward must be added to the episode_sums list in the __init__.
+
+### Raibert Heuristic and Step Contact Targets
+There are a few steps for refining the gait of the Unitree Go2.
+The first step is to calculate where the feet would be due to command velocity. This function is _step_contact_targets. Raibert Heuristic defines the error of where the feet should be compared to where they are now. This error is sent to the _get_rewards function.
+
+### Feet Clearance and Shaped Forces
+By referencing the Legacy Isaac Gym code, the following logic was added to the rewards function to calculate the rewards.
+
+```
+# In Rob6323Go2Env._get_rewards
+# Feet clearance reward
+phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
+foot_height = self.foot_positions_w[:, :, 2]
+target_height = 0.08 * phases + 0.02
+
+rew_foot_clearance = torch.square(target_height - foot_height) * (1.0 - self.desired_contact_states)
+rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
+
+# Contact tracking shaped by forces reward
+foot_forces = torch.norm(self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :], dim=-1)
+desired_contact = self.desired_contact_states
+rew_tracking_contacts_shaped_force = 0.
+for i in range(4):
+    rew_tracking_contacts_shaped_force += - (1 - desired_contact[:, i]) * (1 - torch.exp(-1 * foot_forces[:, i] ** 2 / 100.))        
+rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4 # avg over 4 feet
+```
+
