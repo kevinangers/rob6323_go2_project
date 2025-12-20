@@ -377,6 +377,9 @@ rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), 
 Gait indicies and last actions must be reset for every episode.
 After defining the reward in the rewards dictionary in the _get_rewards function, the reward must be added to the episode_sums list in the __init__.
 
+### Raibert Heuristic and Step Contact Targets
+There are a few steps for refining the gait of the Unitree Go2.
+The first step is to calculate where the feet would be due to command velocity. This function is _step_contact_targets. Raibert Heuristic defines the error of where the feet should be compared to where they are now. This error is sent to the _get_rewards function.
 
 ### Feet Clearance and Shaped Forces
 By referencing the Legacy Isaac Gym code, the following logic was added to the rewards function to calculate the rewards.
