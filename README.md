@@ -298,3 +298,7 @@ For each episode, the static and viscious friction values need to be reset since
 self.mu_v[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.mu_v_lim).expand(-1, 12)
 self.F_s[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.F_s_lim).expand(-1, 12)
 ```
+-------------------------------------------------------------------------------------------------------------------------
+# Tutorial Additions
+To convert the minimal implementation of DirectRLEnv to a more robust walking policy for the Unitree Go2, additional rewards and functions need to be added to the config and env files. 
+
