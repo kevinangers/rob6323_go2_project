@@ -305,10 +305,12 @@ To convert the minimal implementation of DirectRLEnv to a more robust walking po
 ## PD Controller
 Define custom gains and update the robot_cfg in the config. Add the following import:
 ```
+# In Rob6323Go2EnvCfg
 from isaaclab.actuators import ImplicitActuatorCfg
 ```
 Initalize parameters in the __init__ function. Add the following _pre_physics_step and _apply_action to Rob6323Go2EnvCfg.
 ```
+# In Rob6323Go2Env
 def _pre_physics_step(self, actions: torch.Tensor) -> None:
     self._actions = actions.clone()
     # Compute desired joint positions from policy actions
@@ -333,6 +335,7 @@ The following rewards need to be added. With enough rewards, we can describe the
 ## Reward Scales
 Add the following reward scales in the config.
 ```
+# In Rob6323Go2EnvCfg
 # ... rewards given
 action_rate_reward_scale = -0.1  # Added: Step 1.1 Update Configuration 
 orient_reward_scale = -5.0
