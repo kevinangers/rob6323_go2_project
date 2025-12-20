@@ -404,3 +404,81 @@ For each episode, the static and viscious friction values need to be reset since
 self.mu_v[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.mu_v_lim).expand(-1, 12)
 self.F_s[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.F_s_lim).expand(-1, 12)
 ```
+
+## BONUS: Demonstration on Uneven Terrain
+1. In Rob6323Go2EnvCfg, replace
+```
+terrain_type="plane",
+```
+with 
+```
+terrain_type="generator", 
+terrain_generator=ROUGH_TERRAINS_CFG,
+max_init_terrain_level=9,
+```
+
+Ensure that `from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG` is included.
+
+2. To prevent the foot clearance term from exploding on rough terrain, we must modify the existing logic to use the relative foot height with respect to the robot's base instead of it's absolute height. Replace the following lines in the `_get_rewards(self)` function of `Rob6323Go2Env`
+```
+foot_height = self.foot_positions_w[:, :, 2]
+target_height = 0.08 * phases + 0.02
+rew_foot_clearance = torch.square(target_height - foot_height) * (1.0 - self.desired_contact_states)
+```
+with 
+```
+base_z = self.robot.data.root_pos_w[:, 2].unsqueeze(1)
+foot_z_rel = self.foot_positions_w[:, :, 2] - base_z
+target_z_rel = self._nominal_foot_z_rel + (0.08 * phases + 0.02)
+rew_foot_clearance = (target_z_rel - foot_z_rel).square() * (1.0 - self.desired_contact_states)
+```
+
+3. Disable termination via base contacts and base height in `_get_dones(self)`: replace
+```
+died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min
+```
+with
+```
+died = cstr_upsidedown
+```
+
+4. To compute the relative foot to base length, add the following lines:
+In `__init__()` to add a buffer to store the relative lengths:
+```
+self._nominal_foot_z_rel = torch.zeros(self.num_envs, 1, device=self.device)
+```
+
+In `_reset_idx()`, compute the lengths per env:
+```
+base_z = self.robot.data.root_pos_w[env_ids, 2].unsqueeze(1)
+feet_z = self.foot_positions_w[env_ids, :, 2]
+self._nominal_foot_z_rel[env_ids] = torch.mean(feet_z - base_z, dim=1, keepdim=True)
+```
+
+5. To encourage the robot to not stand still, add the `feet_air_time` reward:
+Add these lines to `_get_rewards()`:
+```
+# Feet air-time reward (encourages stepping when commanded)
+first_contact = self._contact_sensor.compute_first_contact(self.step_dt)[:, self._feet_ids_sensor]
+last_air_time = self._contact_sensor.data.last_air_time[:, self._feet_ids_sensor]
+
+# reward a "proper" swing: only when the foot just touched down, and it was in the air for a while
+air_time_rew = torch.sum((last_air_time - 0.3) * first_contact, dim=1)
+
+# gate it: only pay this reward when the command wants motion
+cmd_speed = torch.norm(self._commands[:, :2], dim=1)
+air_time_rew = air_time_rew * (cmd_speed > 0.1)
+```
+In `_get_rewards()`, add this to the `rewards` dict: 
+```
+"feet_air_time": air_time_rew * self.cfg.feet_air_time_reward_scale,
+```
+And add `feet_air_time` to the episode sums in `__init__()`. 
+
+In Rob6323Go2EnvCfg, change the value of `feet_air_time_reward_scale` to 1.0 (if not already added)
+```
+feet_air_time_reward_scale = 1.0
+```
+
+---
+See `rough_terrain_vid.mp4` for results on rough terrain. 
