@@ -165,13 +165,15 @@ class Rob6323Go2Env(DirectRLEnv):
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-        # linear velocity tracking
+        # -- Linear velocity tracking --
         lin_vel_error = torch.sum(torch.square(self._commands[:, :2] - self.robot.data.root_lin_vel_b[:, :2]), dim=1) # squared error between commanded [vx, vy] and actual [vx, vy]
         lin_vel_error_mapped = torch.exp(-lin_vel_error / 0.25) # map to [0, 1] using exponential mapping (good tracking ~ 1, bad tracking ~ 0)
-        # yaw rate tracking
+        
+        # -- Yaw rate tracking --
         yaw_rate_error = torch.square(self._commands[:, 2] - self.robot.data.root_ang_vel_b[:, 2])
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / 0.25)
-        # action rate penalization
+        
+        # -- Action rate penalization --
         # First derivative (Current - Last)
         rew_action_rate = torch.sum(torch.square(self._actions - self.last_actions[:, :, 0]), dim=1) * (self.cfg.action_scale ** 2)
         # Second derivative (Current - 2*Last + 2ndLast)
@@ -181,24 +183,25 @@ class Rob6323Go2Env(DirectRLEnv):
         self.last_actions = torch.roll(self.last_actions, 1, 2)
         self.last_actions[:, :, 0] = self._actions[:]
 
-        # Update desired contact states
+        # -- Desired contact states from raibert heuristic --
         self._step_contact_targets()  
         rew_raibert_heuristic = self._reward_raibert_heuristic()
 
-        # Penalize non-vertical orientation (projected gravity on XY plane)
+        # -- Penalize non-vertical orientation (projected gravity on XY plane) --
         rew_orient = torch.sum(torch.square(self.robot.data.projected_gravity_b[:, :2]), dim=1)
 
-        # Penalize vertical velocity (z-component of base linear velocity)
+        # -- Penalize vertical velocity (z-component of base linear velocity) --
         rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
 
-        # Penalize high joint velocities
+        # -- Penalize high joint velocities --
         rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1)
 
-        # Penalize angular velocity in XY plane (roll/pitch)
+        # -- Penalize angular velocity in XY plane (roll/pitch) --
         rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
 
-        # Feet clearance reward
+        # -- Feet clearance reward --
         phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
+        
         # foot_height = self.foot_positions_w[:, :, 2]
         # target_height = 0.08 * phases + 0.02
         # rew_foot_clearance = torch.square(target_height - foot_height) * (1.0 - self.desired_contact_states)
@@ -211,7 +214,7 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_foot_clearance = (target_z_rel - foot_z_rel).square() * (1.0 - self.desired_contact_states)
         rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
 
-        # Contact tracking shaped by forces reward
+        # -- Contact tracking shaped by forces reward --
         foot_forces = torch.norm(self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :], dim=-1)
         desired_contact = self.desired_contact_states
         rew_tracking_contacts_shaped_force = 0.
@@ -222,10 +225,10 @@ class Rob6323Go2Env(DirectRLEnv):
         
         rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4 # avg over 4 feet
 
-        # Torque Regularization
+        # -- Torque Regularization --
         rew_torque = torch.sum(torch.square(self.torques), dim=1)
 
-        # Foot2Contact Reward
+        # -- Foot2Contact Reward --
         # NOTE: Using the Z component of world-frame net_forces_w for feet
         foot_contact_forces_z = self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2]
         
@@ -240,7 +243,7 @@ class Rob6323Go2Env(DirectRLEnv):
         #    - If num_contacts is 0 or 4, penalty is |0-2|/2 = 1 or |4-2|/2 = 1 (max penalty)
         rew_foot2contact = - torch.abs(num_contacts - 2) / 2.0
 
-        # Feet air-time reward (encourages stepping when commanded)
+        # -- Feet air-time reward (encourages stepping when commanded) --
         first_contact = self._contact_sensor.compute_first_contact(self.step_dt)[:, self._feet_ids_sensor]  # (E,4)
         last_air_time = self._contact_sensor.data.last_air_time[:, self._feet_ids_sensor]                  # (E,4)
 
@@ -387,7 +390,7 @@ class Rob6323Go2Env(DirectRLEnv):
         # cstr_base_height_min = base_height < self.cfg.base_height_min
 
         # died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min
-        died = cstr_termination_contacts | cstr_upsidedown
+        died = cstr_upsidedown
         return died, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None): 
