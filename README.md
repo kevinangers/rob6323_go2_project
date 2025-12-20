@@ -302,3 +302,101 @@ self.F_s[env_ids] = (torch.rand(len(env_ids), 1, device=self.device) * self.cfg.
 # Tutorial Additions
 To convert the minimal implementation of DirectRLEnv to a more robust walking policy for the Unitree Go2, additional rewards and functions need to be added to the config and env files. 
 
+## PD Controller
+Define custom gains and update the robot_cfg in the config. Add the following import:
+```
+from isaaclab.actuators import ImplicitActuatorCfg
+```
+Initalize parameters in the __init__ function. Add the following _pre_physics_step and _apply_action to Rob6323Go2EnvCfg.
+```
+def _pre_physics_step(self, actions: torch.Tensor) -> None:
+    self._actions = actions.clone()
+    # Compute desired joint positions from policy actions
+    self.desired_joint_pos = (
+        self.cfg.action_scale * self._actions 
+        + self.robot.data.default_joint_pos
+    )
+```
+
+## Rewards
+The following rewards need to be added. With enough rewards, we can describe the behavior we want the robot to learn on its own. For the raibert_heuristic_reward, add a raibert_heuristic function describing the symmetric gait.
+
+action_rate: Penalizes high frequency oscillations with first and second derivative
+orient_reward: Prevent orientation
+lin_vel_z_reward: Prevent bouncing
+dof_vel_reward: Prevents high joint velocities
+ang_vel_xy_reward: Penalize angular velocity in the X and Y plane
+raibert_heuristic_reward: Footwork that follows trotting symmetric gait
+feet_clearance_reward: Lifting feet during a swing
+tracking_contacts_shaped_force_reward: Grounding feet during a stance
+
+## Reward Scales
+Add the following reward scales in the config.
+```
+# ... rewards given
+action_rate_reward_scale = -0.1  # Added: Step 1.1 Update Configuration 
+orient_reward_scale = -5.0
+lin_vel_z_reward_scale = -0.02
+dof_vel_reward_scale = -0.0001
+ang_vel_xy_reward_scale = -0.001
+raibert_heuristic_reward_scale = -10.0
+feet_clearance_reward_scale = -30.0
+tracking_contacts_shaped_force_reward_scale = 4.0
+```
+## Reward Implementations
+
+### Apply Action Rate
+Initialize a torch tensor to record past actions. Find the difference between the current and last self._actions. The second derivative (Current - 2* Last + 2nd Last Value) is calculated and added to the first derivative.
+
+### Orientation
+Use projected_gravity_b to penalize non-vertical orientation. Use the following line in the _get_rewards function.
+```
+# In Rob6323Go2Env._get_rewards
+rew_orient = torch.sum(torch.square(self.robot.data.projected_gravity_b[:, :2]), dim=1)
+```
+### Vertical Velocity
+Use the z component of the base linear velocity. Use the following line in the _get_rewards function.
+```
+# In Rob6323Go2Env._get_rewards
+rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
+```
+### Joint Velocities
+joint_vel has the values for the joint velocities. 
+```
+# In Rob6323Go2Env._get_rewards
+rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1)
+
+```
+### Angular Velocity
+The angular velocities can be accessed by root_ang_vel_b.
+```
+# In Rob6323Go2Env._get_rewards
+rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
+```
+### _reset_idx and Episode Sums
+Gait indicies and last actions must be reset for every episode.
+After defining the reward in the rewards dictionary in the _get_rewards function, the reward must be added to the episode_sums list in the __init__.
+
+
+### Feet Clearance and Shaped Forces
+By referencing the Legacy Isaac Gym code, the following logic was added to the rewards function to calculate the rewards.
+
+```
+# In Rob6323Go2Env._get_rewards
+# Feet clearance reward
+phases = 1 - torch.abs(1.0 - torch.clip((self.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0)
+foot_height = self.foot_positions_w[:, :, 2]
+target_height = 0.08 * phases + 0.02
+
+rew_foot_clearance = torch.square(target_height - foot_height) * (1.0 - self.desired_contact_states)
+rew_feet_clearance = torch.sum(rew_foot_clearance, dim=1)
+
+# Contact tracking shaped by forces reward
+foot_forces = torch.norm(self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, :], dim=-1)
+desired_contact = self.desired_contact_states
+rew_tracking_contacts_shaped_force = 0.
+for i in range(4):
+    rew_tracking_contacts_shaped_force += - (1 - desired_contact[:, i]) * (1 - torch.exp(-1 * foot_forces[:, i] ** 2 / 100.))        
+rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4 # avg over 4 feet
+```
+
